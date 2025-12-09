@@ -1,0 +1,14 @@
+# 忽略虛擬環境資料夾 (你的虛擬環境叫 flask)
+flask/
+venv/
+env/
+source/
+front/
+test/
+# 忽略 Python 編譯檔
+__pycache__/
+*.pyc
+
+# 忽略環境變數檔 (如果有)
+.env
+_debug_parsed_data.json

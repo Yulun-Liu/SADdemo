@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>畢業學分審查儀表板</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- (新) 載入 Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 載入 marked.js -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        /* 使用 Inter 字體 */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* 載入動畫的樣式 */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* <details> 標籤的箭頭樣式 */
+        details > summary {
+            list-style: none;
+        }
+        details > summary::-webkit-details-marker {
+            display: none;
+        }
+        details.course-list summary::before {
+            content: '►';
+            margin-right: 0.5rem;
+            font-size: 0.8em;
+            transition: transform 0.2s;
+        }
+        details[open].course-list summary::before {
+            transform: rotate(90deg);
+        }
+        /* === 新增：聊天室 Markdown 樣式修正 === */
+        /* 讓表格有邊框、清單有圓點 */
+        .markdown-body table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
+            font-size: 0.9em;
+        }
+        .markdown-body th, .markdown-body td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .markdown-body th {
+            background-color: #f3f4f6; /* 淺灰底色 */
+            font-weight: bold;
+            color: #1f2937;
+        }
+        .markdown-body ul {
+            list-style-type: disc; /* 實心圓點 */
+            padding-left: 20px;
+            margin: 5px 0;
+        }
+        .markdown-body ol {
+            list-style-type: decimal; /* 數字清單 */
+            padding-left: 20px;
+            margin: 5px 0;
+        }
+        .markdown-body strong {
+            font-weight: 700;
+            color: #d946ef; /* 強調文字用亮紫色，或您喜歡的顏色 */
+        }
+        .markdown-body p {
+            margin-bottom: 8px; /* 段落間距 */
+        }
+        .markdown-body blockquote {
+            border-left: 4px solid #3b82f6;
+            padding-left: 10px;
+            color: #4b5563;
+            background-color: #f9fafb;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+    <!-- 左側導航欄 (上傳區) -->
+    <div class="fixed left-0 top-0 w-80 h-full bg-blue-800 text-white p-8 shadow-lg">
+        <h1 class="text-3xl font-bold mb-8">畢業審查小幫手</h1>
+        
+        <p class="text-sm text-blue-200 mb-6">
+            請上傳您的「畢業資格審查個人詳細報表」PDF 檔案，系統將自動為您分析。
+        </p>
+
+        <form id="uploadForm">
+            <label for="pdfFile" class="block text-sm font-medium text-blue-100 mb-2">上傳 PDF 檔案</label>
+            
+            <!-- 檔案選擇器 (新樣式) -->
+            <label for="pdfFile" class="w-full bg-blue-700 hover:bg-blue-600 text-blue-100 rounded-lg p-4 flex items-center cursor-pointer transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                <span id="fileName" class="text-sm truncate">選擇檔案...</span>
+            </label>
+            <input type="file" id="pdfFile" accept=".pdf" class="hidden"/>
+            
+            <p class="text-xs text-blue-300 mt-2">請放心，您的檔案不會被儲存。</p>
+            
+            <!-- 上傳按鈕 -->
+            <button id="uploadButton" class="mt-8 w-full bg-white text-blue-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-100 transition duration-300 disabled:opacity-50">
+                <span class="flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                    </svg>
+                    開始審查
+                </span>
+            </button>
+        </form>
+    </div>
+
+    <!-- 右側主內容區 -->
+    <div class="ml-80 p-12">
+        <h2 class="text-4xl font-bold text-gray-800 mb-8">審查結果</h2>
+
+        <!-- 狀態訊息 (合併 載入 / 錯誤 / 成功) -->
+        <div id="statusBox" class="mb-8 p-4 rounded-lg" style="display: none;">
+            <!-- 狀態訊息將顯示在這裡 -->
+        </div>
+
+        <!-- 結果顯示區域 (預設隱藏) -->
+        <div id="resultsContainer" class="space-y-10" style="display: none;">
+            
+            <!-- 1. 學生資訊 & 總進度 -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div id="studentInfo" class="mb-4">
+                    <!-- 學生資訊將插入此處 -->
+                </div>
+                <div id="totalProgress">
+                    <!-- 總進度條將插入此處 -->
+                </div>
+            </div>
+            
+            <!-- 2. AI 建議 -->
+            <div id="chatSection" class="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200">
+                <div class="bg-indigo-50 p-4 border-b border-gray-200">
+                    <h3 class="text-lg font-bold text-indigo-900 flex items-center">
+                        💬 AI 學業諮詢室
+                    </h3>
+                </div>
+                
+                <div id="chatHistory" class="p-6 h-64 overflow-y-auto space-y-4 bg-gray-50">
+                    <div class="flex items-start">
+                        <div class="bg-indigo-100 p-2 rounded-full mr-3 flex-shrink-0">🤖</div>
+                        <div class="bg-white p-3 rounded-lg shadow-sm text-gray-700 text-sm border border-gray-200">
+                            你好！我是你的學業助手。成績單已分析完畢，有任何問題（例如：我還差多少選修？）都可以直接問我喔！
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-4 bg-white border-t border-gray-200 flex">
+                    <input type="text" id="userQuestionInput" 
+                        class="flex-grow border border-gray-300 rounded-l-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" 
+                        placeholder="輸入你的問題...">
+                    <button id="sendQuestionBtn" 
+                        class="bg-indigo-600 text-white px-6 py-2 rounded-r-lg hover:bg-indigo-700 transition font-medium">
+                        發送
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3. 圖表網格 -->
+            <div>
+                <h3 class="text-2xl font-semibold text-gray-700 mb-4">各類別學分進度</h3>
+                <div id="chartsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- 圓餅圖將插入此處 -->
+                </div>
+            </div>
+
+            <!-- 4. 課程修習狀態總表 (新) -->
+            <div>
+                <h3 class="text-2xl font-semibold text-gray-700 mb-4">各類別課程修習狀態總表</h3>
+                <div id="courseListContainer" class="space-y-2">
+                    <!-- 課程列表 (手風琴) 將插入此處 -->
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+
+    <script>
+        // =====================================================================
+        // 
+        //                           E-L (核心 JavaScript)
+        // 
+        // =====================================================================
+
+        // 取得 HTML 元素
+        const uploadForm = document.getElementById('uploadForm');
+        const pdfFileInput = document.getElementById('pdfFile');
+        const fileName = document.getElementById('fileName');
+        const uploadButton = document.getElementById('uploadButton');
+        const statusBox = document.getElementById('statusBox');
+        const resultsContainer = document.getElementById('resultsContainer');
+        const studentInfo = document.getElementById('studentInfo');
+        const totalProgress = document.getElementById('totalProgress');
+        const chartsGrid = document.getElementById('chartsGrid');
+        const courseListContainer = document.getElementById('courseListContainer'); // (新)
+
+        // 新增聊天室 DOM 元素變數 
+        const chatSection = document.getElementById('chatSection');
+        const chatHistory = document.getElementById('chatHistory');
+        const userQuestionInput = document.getElementById('userQuestionInput');
+        const sendQuestionBtn = document.getElementById('sendQuestionBtn');
+
+        // 後端 API 的網址
+        const API_URL = 'http://127.0.0.1:5000/api/audit';
+
+        // 對話 API 網址
+        const CHAT_API_URL = 'http://127.0.0.1:5000/api/chat';
+        
+        // 用於儲存 Chart.js 實例，以便稍後銷毀
+        let activeCharts = [];
+
+        // 全域變數儲存學生資料
+        let globalStudentData = null;
+
+        // 監聽檔案選擇
+        pdfFileInput.addEventListener('change', () => {
+            if (pdfFileInput.files.length > 0) {
+                fileName.textContent = pdfFileInput.files[0].name;
+            } else {
+                fileName.textContent = '選擇檔案...';
+            }
+        });
+
+        // (新) 統一的狀態顯示函數
+        function showStatus(message, type = 'info') {
+            statusBox.style.display = 'flex';
+            statusBox.classList.remove('bg-red-100', 'text-red-700', 'border-red-300', 'bg-green-100', 'text-green-700', 'border-green-300', 'bg-blue-100', 'text-blue-700', 'border-blue-300');
+            
+            let icon = '';
+            if (type === 'error') {
+                statusBox.classList.add('bg-red-100', 'text-red-700', 'border-red-300');
+                icon = '❌ ';
+            } else if (type === 'success') {
+                statusBox.classList.add('bg-green-100', 'text-green-700', 'border-green-300');
+                icon = '✅ ';
+            } else { // info
+                statusBox.classList.add('bg-blue-100', 'text-blue-700', 'border-blue-300');
+                icon = '<div class="loader mr-3 flex-shrink-0"></div>';
+            }
+            statusBox.innerHTML = `${icon} <span class="flex-grow">${message}</span>`;
+        }
+
+        function hideStatus() {
+            statusBox.style.display = 'none';
+        }
+        
+        // 監聽上傳
+        uploadForm.addEventListener('submit', handleSubmit);
+
+        async function handleSubmit(event) {
+            event.preventDefault(); // 阻止表單的預設提交行為
+            
+            const file = pdfFileInput.files[0];
+            if (!file) {
+                showStatus('請先選擇一個 PDF 檔案。', 'error');
+                return;
+            }
+
+            // 準備 FormData
+            const formData = new FormData();
+            formData.append('pdf_file', file);
+
+            // 切換 UI 狀態
+            hideStatus();
+            resultsContainer.style.display = 'none';
+            showStatus('正在上傳並分析 PDF...', 'info');
+
+
+            // 上傳開始時，重置聊天室 
+            globalStudentData = null; // 清空舊資料
+            chatHistory.innerHTML = `
+                <div class="flex items-start">
+                    <div class="bg-indigo-100 p-2 rounded-full mr-3 flex-shrink-0">🤖</div>
+                    <div class="bg-white p-3 rounded-lg shadow-sm text-gray-700 text-sm border border-gray-200">
+                        你好！成績單分析完畢，有任何問題（例如：我的學習規劃？）都可以直接問我喔！
+                    </div>
+                </div>`;
+
+            uploadButton.disabled = true;
+            uploadButton.querySelector('span').innerText = '處理中...';
+            
+            // (新) 銷毀舊圖表
+            activeCharts.forEach(chart => chart.destroy());
+            activeCharts = [];
+            chartsGrid.innerHTML = ''; // 清空圖表
+            courseListContainer.innerHTML = ''; // (新) 清空列表
+
+            try {
+                // 4. 發送請求到後端
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || '發生未知的後端錯誤。');
+                }
+
+                // 上傳成功，儲存資料供聊天使用 
+                globalStudentData = data; 
+                // 注意：這裡移除了原本檢查 data.ai_advice 的程式碼
+
+                // 5. 成功，渲染結果
+                showStatus(`分析完成！${data.message}`, 'success');
+                renderResults(data);
+                resultsContainer.style.display = 'block';
+
+            } catch (error) {
+                // 6. 失敗，顯示錯誤
+                console.error('上傳失敗:', error);
+                showStatus(`上傳失敗: ${error.message}`, 'error');
+            } finally {
+                // 7. 恢復 UI
+                uploadButton.disabled = false;
+                uploadButton.querySelector('span').innerHTML = `
+                    <span class="flex items-center justify-center">開始審查</span>`;
+            }
+        }
+        
+        // 渲染結果的主函數
+        function renderResults(data) {
+            const report = data.audit_report;
+            const sInfo = data.student_info;
+            const totals = data.totals;
+
+            
+
+            // 1. 渲染學生資訊
+            studentInfo.innerHTML = `
+                <h3 class="text-xl font-semibold text-gray-700">
+                    學生: ${sInfo.id || 'N/A'} ${sInfo.name || 'N/A'}
+                </h3>
+                <p class="text-gray-600 mt-1">
+                    <span class="font-medium">科系:</span> ${sInfo.department || 'N/A'} | 
+                    <span class="font-medium">修業年度:</span> ${sInfo.year || 'N/A'}
+                </p>
+            `;
+            
+            // 2. 渲染總進度條
+            const totalEarned = totals.total_earned;
+            const totalRequired = totals.total_required;
+            const totalPercent = totalRequired > 0 ? (totalEarned / totalRequired) * 100 : 0;
+            const totalColor = totalEarned >= totalRequired ? 'bg-green-500' : 'bg-blue-600';
+            
+            totalProgress.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <h3 class="text-lg font-semibold text-gray-700">畢業學分進度 (最低要求: ${totalRequired} 學分)</h3>
+                    <span class="text-lg font-bold ${totalEarned >= totalRequired ? 'text-green-600' : 'text-gray-800'}">
+                        ${totalEarned} / ${totalRequired} 學分
+                    </span>
+                </div>
+                <div class_w-full bg-gray-200 rounded-full h-4">
+                    <div class="${totalColor} h-4 rounded-full text-xs text-white text-center font-bold" style="width: ${totalPercent > 100 ? 100 : totalPercent}%">
+                        ${totalPercent.toFixed(0)}%
+                    </div>
+                </div>
+            `;
+
+            // 3. (新) 建立一個統一的順序
+            const categoryOrder = ["必修", "院必修", "選修", "通識", "共同必修", "其他"];
+            
+            // 4. (新) 清空舊內容
+            chartsGrid.innerHTML = '';
+            courseListContainer.innerHTML = '';
+
+            for (const category of categoryOrder) {
+                if (!report[category]) continue;
+                
+                const data = report[category];
+                if (category === "其他" && data.earned_sum === 0 && data.failed_courses.length === 0) {
+                    continue; // 如果「其他」沒有任何課程，就跳過
+                }
+
+                // 4a. 繪製圓餅圖
+                createDonutChart(category, data);
+                
+                // 4b. (新) 建立課程列表
+                renderCourseList(category, data);
+            }
+        }
+        
+        //=========================================================
+        // === 修改點 5：新增聊天功能的邏輯 ===
+        // =========================================================
+        
+        sendQuestionBtn.addEventListener('click', sendChat);
+        userQuestionInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendChat();
+        });
+
+        async function sendChat() {
+            // A. 先取得輸入文字
+            const text = userQuestionInput.value.trim();
+            if (!text) return; // 如果沒輸入文字，直接結束
+
+            // B. ★★★ 修正點：先檢查資料是否存在，再讀取 ID ★★★
+            // 如果 globalStudentData 是 null，這裡就會攔截並警告，不會報錯
+            if (!globalStudentData || !globalStudentData.student_info || !globalStudentData.student_info.id) {
+                alert("請先上傳 PDF 檔案，系統分析後才能回答問題喔！");
+                return;
+            }
+
+            // C. 確定資料安全後，才讀取學號
+            const currentStudentId = globalStudentData.student_info.id;
+
+            // D. 顯示 User 訊息並清空輸入框
+            appendMessage('user', text);
+            userQuestionInput.value = '';
+
+            // E. 顯示 Loading，並取得該訊息的 ID (loadingId)
+            const loadingId = appendMessage('ai', '思考中...', true);
+
+            try {
+                // F. 呼叫後端 API
+                const res = await fetch(CHAT_API_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        message: text, 
+                        student_id: currentStudentId 
+                    })
+                });
+
+                const data = await res.json();
+                
+                // G. ★★★ 關鍵：先移除 Loading，再顯示新訊息 ★★★
+                removeMessage(loadingId); 
+                
+                if (data.reply) {
+                    appendMessage('ai', data.reply);
+                } else {
+                    appendMessage('ai', '抱歉，發生錯誤，無法取得回應。');
+                }
+
+            } catch (err) {
+                // H. 發生錯誤也要記得移除 Loading
+                removeMessage(loadingId);
+                console.error(err);
+                appendMessage('ai', '連線錯誤，請檢查後端伺服器。');
+            }
+        }
+
+        function appendMessage(role, text, isLoading = false) {
+            const div = document.createElement('div');
+            // 設定外層 Flex 容器方向
+            div.className = `flex items-start ${role === 'user' ? 'justify-end' : ''}`;
+            const id = 'msg-' + Date.now()+ '-' + Math.floor(Math.random() * 1000);
+            div.id = id;
+            
+            // 1. 建立頭像元素
+            const iconDiv = document.createElement('div');
+            if (role === 'ai') {
+                iconDiv.className = "bg-indigo-100 p-2 rounded-full mr-3 flex-shrink-0";
+                iconDiv.innerText = "🤖";
+            } else {
+                iconDiv.className = "bg-gray-300 p-2 rounded-full ml-3 flex-shrink-0";
+                iconDiv.innerText = "👤";
+            }
+
+            // 2. 建立訊息內容元素
+            const contentDiv = document.createElement('div');
+            
+            if (role === 'ai') {
+                // === AI 樣式 ===
+                // 加入 'markdown-body' (套用 CSS) 和 'overflow-x-auto' (讓表格可橫向捲動)
+                contentDiv.className = `bg-white p-3 rounded-lg shadow-sm text-gray-700 text-sm border border-gray-200 markdown-body overflow-x-auto ${isLoading ? 'animate-pulse' : ''}`;
+                
+                if (isLoading) {
+                    // 載入中：顯示純文字
+                    contentDiv.innerText = text;
+                } else {
+                    // ★★★ 關鍵修改：將 Markdown 轉換為 HTML ★★★
+                    // 確保您有在 <head> 引入 marked.js
+                    contentDiv.innerHTML = marked.parse(text);
+                }
+            } else {
+                // === User 樣式 ===
+                contentDiv.className = "bg-indigo-600 text-white p-3 rounded-lg shadow-sm text-sm";
+                // 使用者輸入一律用純文字，防止惡意程式碼注入
+                contentDiv.innerText = text;
+            }
+
+            // 3. 根據角色決定排列順序 (AI: 頭像在左 / User: 頭像在右)
+            if (role === 'ai') {
+                div.appendChild(iconDiv);
+                div.appendChild(contentDiv);
+            } else {
+                div.appendChild(contentDiv);
+                div.appendChild(iconDiv);
+            }
+
+            // 4. 加入聊天室並捲動到底部
+            chatHistory.appendChild(div);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+            return id;
+        }
+
+        function removeMessage(id) {
+            const el = document.getElementById(id);
+            if(el) el.remove();
+        }
+
+        // 繪製圓餅圖的函數
+        function createDonutChart(category, data) {
+            const chartWrapper = document.createElement('div');
+            chartWrapper.className = 'bg-white p-6 rounded-lg shadow h-full flex flex-col';
+            
+            const goal = data.goal;
+            const earned = data.earned_sum;
+            const remaining = Math.max(0, goal - earned);
+            const percent = goal > 0 ? (earned / goal) * 100 : 100;
+            const isCompleted = earned >= goal;
+            
+            let color = '#3B82F6'; // Blue
+            if (isCompleted) color = '#10B981'; // Green
+            if (percent < 75) color = '#F59E0B'; // Yellow/Orange
+            if (percent < 50) color = '#EF4444'; // Red
+
+            // (新) 通識的特殊檢查
+            let isCoreComplete = true;
+            if (category === '通識') {
+                isCoreComplete = data.is_core_complete;
+                if (!isCoreComplete) color = '#EF4444'; // 如果核心未完成，必定是紅色
+                if (isCompleted && isCoreComplete) color = '#10B981'; // 兩者都完成才是綠色
+            }
+
+            // Canvas
+            const canvas = document.createElement('canvas');
+            chartWrapper.appendChild(canvas);
+            
+            // 圖表標題
+            const title = document.createElement('h4');
+            title.className = 'text-xl font-semibold text-gray-700 text-center mt-4';
+            title.innerText = category;
+            chartWrapper.appendChild(title);
+            
+            chartsGrid.appendChild(chartWrapper);
+            
+            // 建立圖表
+            const ctx = canvas.getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    datasets: [{
+                        data: [earned, remaining],
+                        backgroundColor: [color, '#E5E7EB'],
+                        borderWidth: 0,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    cutout: '70%',
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { enabled: false },
+                    },
+                    animation: {
+                        animateScale: true,
+                        animateRotate: true
+                    }
+                },
+                // (新) 中間的文字
+                plugins: [{
+                    id: 'centerText',
+                    afterDraw: (chart) => {
+                        const ctx = chart.ctx;
+                        const { width, height } = chart.chartArea;
+                        
+                        ctx.restore();
+                        ctx.font = 'bold 1.5rem Inter';
+                        ctx.fillStyle = color;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        
+                        let text1 = '';
+                        if (category === '其他') {
+                            text1 = `${earned}`;
+                        } else if (category === '通識') {
+                            const coreEarned = data.core_passed_count;
+                            const coreGoal = data.core_required_prefixes.length;
+                            text1 = `${earned}/${goal}`; // 學分
+                            
+                            // (新) 核心文字
+                            ctx.font = 'bold 1rem Inter';
+                            ctx.fillStyle = isCoreComplete ? '#10B981' : '#EF4444';
+                            ctx.fillText(`${coreEarned}/${coreGoal} 核心`, width / 2, height / 2 + 30);
+
+                        } else {
+                             text1 = `${earned}/${goal}`;
+                        }
+                        
+                        ctx.fillStyle = color; // 確保顏色正確
+                        ctx.font = 'bold 1.5rem Inter';
+                        ctx.fillText(text1, width / 2, height / 2 - (category === '通識' ? 10 : 0));
+                        
+                        // "學分"
+                        ctx.font = '0.875rem Inter';
+                        ctx.fillStyle = '#6B7280';
+                        ctx.fillText('學分', width / 2, height / 2 + 15 + (category === '通識' ? -10 : 0));
+                        
+                        ctx.save();
+                    }
+                }]
+            });
+            activeCharts.push(chart);
+        }
+
+        // (新) 建立課程列表（手風琴）的函數
+        function renderCourseList(category, data) {
+            const courses = data.earned_courses || [];
+            const failed_courses = data.failed_courses || [];
+
+            // 建立 <details> 元素
+            const details = document.createElement('details');
+            details.className = 'course-list bg-white rounded-lg shadow-sm border border-gray-200';
+            
+            // 建立 <summary> 標題
+            const summary = document.createElement('summary');
+            summary.className = 'p-4 flex justify-between items-center cursor-pointer select-none';
+            
+            const title = document.createElement('h4');
+            title.className = 'text-lg font-semibold text-gray-700';
+            title.innerText = `${category} (${courses.length} 門已通過, ${failed_courses.length} 門未通過)`;
+            
+            const summaryStatus = document.createElement('span');
+            summaryStatus.className = 'text-sm font-medium text-gray-500';
+            summaryStatus.innerText = '點擊展開';
+            
+            summary.appendChild(title);
+            summary.appendChild(summaryStatus);
+            details.appendChild(summary);
+
+            // 建立內容容器
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'p-4 border-t border-gray-200 bg-gray-50 space-y-4';
+            
+            let contentHtml = '';
+
+            // (新) 通識核心資訊
+            if (category === '通識') {
+                const { core_passed_count, core_required_prefixes, is_core_complete, core_missing_prefixes } = data;
+                contentHtml += `
+                    <div class="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                        <h5 class="font-semibold text-blue-800">核心領域 (已達成: ${core_passed_count} / ${core_required_prefixes.length})</h5>
+                `;
+                if (is_core_complete) {
+                    contentHtml += `<p class="text-sm text-green-700 mt-1">✅ 所有核心領域皆已修習。</p>`;
+                } else {
+                    contentHtml += `<p class="text-sm text-red-700 mt-1">
+                        <span class="font-semibold">尚缺領域:</span> ${core_missing_prefixes.join(', ')}
+                    </p>`;
+                }
+                contentHtml += `</div>`;
+            }
+
+            // 已通過課程
+            contentHtml += '<h5 class="text-base font-semibold text-green-700">已通過課程</h5>';
+            if (courses.length > 0) {
+                contentHtml += `<ul class="list-disc pl-5 space-y-1 text-gray-600 font-mono text-sm">
+                    ${courses.map(course => `<li>${course}</li>`).join('')}
+                </ul>`;
+            } else {
+                contentHtml += '<p class="text-sm text-gray-500">(無)</p>';
+            }
+
+            // 未通過課程
+            if (failed_courses.length > 0) {
+                contentHtml += '<h5 class="text-base font-semibold text-red-700 mt-4">未通過課程 (需注意)</h5>';
+                contentHtml += `<ul class="list-disc pl-5 space-y-1 text-red-600 font-mono text-sm">
+                    ${failed_courses.map(course => `<li>${course}</li>`).join('')}
+                </ul>`;
+            }
+            
+            contentDiv.innerHTML = contentHtml;
+            details.appendChild(contentDiv);
+            
+            // 監聽點擊，更新文字
+            details.addEventListener('toggle', () => {
+                summaryStatus.innerText = details.open ? '點擊收合' : '點擊展開';
+            });
+            
+            courseListContainer.appendChild(details);
+        }
+
+    </script>
+</body>
+</html>
