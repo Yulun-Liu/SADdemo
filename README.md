@@ -98,11 +98,3 @@ python app.py
 3.  **上傳 PDF**：點擊左側「上傳 PDF」按鈕，選擇學校匯出的成績單檔案。
 4.  **AI 諮詢**：在右側的對話框輸入問題（例如：「我還差多少通識學分？」），AI 將根據您的資料回答。
 
-## 🤝 貢獻與開發 (Contributing)
-
-歡迎 Fork 此專案並提交 Pull Request。如有任何問題，請開立 Issue 討論。
-
-## 📝 License
-
-This project is licensed under the MIT License.
-
