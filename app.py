@@ -4,11 +4,12 @@ import re
 import pdfplumber
 import os
 import tempfile
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 from typing import Tuple # 匯入 Tuple 型別
 from dotenv import load_dotenv
 
+#關閉flask 語法 deactivate
 # === 新增：Groq 官方套件 ===
 from groq import Groq
 
@@ -20,7 +21,7 @@ client = Groq()
 
 
 # === 匯入剛剛寫好的資料庫模組 ===
-from save_to_db import save_student_data,get_student_data_from_db
+from save_to_db import save_student_data,get_student_data_from_db, check_user_exists
 
 # ======================================================================
 # 
@@ -312,6 +313,70 @@ def calculate_graduation_audit(all_courses: list) -> Tuple[dict, dict]:
 app = Flask(__name__)
 CORS(app) # 允許所有來源的前端呼叫此 API
 
+
+# ==========================================
+#  前端網頁路由 (使用 Template 模式)
+# ==========================================
+
+# 1. 根目錄路由：直接顯示登入頁
+@app.route('/')
+def root():
+    # Flask 會自動去 templates 資料夾找 login.html
+    return render_template('login.html')
+
+# 2. 登入頁路由 (防止有人手動輸入網址)
+@app.route('/login.html')
+def login_page():
+    return render_template('login.html')
+
+# 3. 主頁路由 (對應前端 JS 的 window.location.href = 'index.html')
+@app.route('/index.html')
+def dashboard():
+    return render_template('index.html')
+
+
+
+# ==========================================
+#  登入 API (支援轉系生/新使用者)
+# ==========================================
+@app.route("/api/login", methods=["POST"])
+def handle_login():
+    try:
+        data = request.json
+        student_id = data.get('student_id')
+        
+        if not student_id:
+            return jsonify({"success": False, "message": "請輸入學號"}), 400
+            
+        # 1. 先去資料庫找找看有沒有這個人
+        user_info = check_user_exists(student_id)
+        
+        if user_info:
+            # A. 老朋友：資料庫有資料
+            return jsonify({
+                "success": True, 
+                "user": user_info
+            })
+        else:
+            # B. 新朋友/轉系生：資料庫沒資料
+            # ★ 關鍵修改：不要回傳 401 錯誤，而是讓他通過！
+            # 我們給他一個暫時的身分，讓他能進去 index.html 上傳檔案
+            return jsonify({
+                "success": True, 
+                "user": {
+                    "id": student_id,
+                    "name": "新同學",       # 暫時的稱呼
+                    "department": "尚未驗證" # 暫時的系所
+                }
+            })
+            
+    except Exception as e:
+        print(f"Login API Error: {e}")
+        return jsonify({"success": False, "message": "系統錯誤"}), 500
+
+# ==========================================
+#  PDF 上傳與審查 API
+# ==========================================
 @app.route("/api/audit", methods=["POST"])
 def handle_pdf_upload():
     """
@@ -547,6 +612,46 @@ def handle_chat():
     except Exception as e:
         print(f"Chat Error: {e}")
         return jsonify({"reply": "AI 暫時無法回應，請稍後再試。"}), 500
+    
+# ==========================================================
+#  (新增) 獲取學生完整資料 API (用於登入後自動載入)
+# ==========================================================
+@app.route("/api/student/data", methods=["POST"])
+def get_student_full_data():
+    try:
+        data = request.json
+        student_id = data.get('student_id')
+        
+        if not student_id:
+            return jsonify({"error": "缺少學號"}), 400
+
+        # 1. 從資料庫撈取資料 (使用現有的函式)
+        db_student_info, db_courses = get_student_data_from_db(student_id)
+        
+        # 如果資料庫完全沒資料 (代表是第一次登入的新用戶)
+        if not db_student_info:
+            return jsonify({
+                "found": False, 
+                "message": "尚無資料，請上傳 PDF"
+            })
+
+        # 2. 進行畢業審查計算 (使用現有的函式)
+        audit_results, totals = calculate_graduation_audit(db_courses)
+
+        # 3. 回傳跟上傳 PDF 時完全一樣的 JSON 結構
+        return jsonify({
+            "found": True,
+            "message": "成功載入舊資料",
+            "student_info": db_student_info,
+            "audit_report": audit_results,
+            "totals": totals
+        })
+
+    except Exception as e:
+        print(f"Fetch Data Error: {e}")
+        return jsonify({"error": "系統錯誤"}), 500
+    
+
 # ... (原本的 if __name__ == "__main__": 保持不變)
 # --- 程式執行入口 ---
 if __name__ == "__main__":

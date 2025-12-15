@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登入 - 畢業審查系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 flex items-center justify-center min-h-screen">
+
+    <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md transform transition-all hover:scale-105 duration-300">
+        <div class="text-center mb-8">
+            <div class="text-6xl mb-4">🎓</div>
+            <h1 class="text-3xl font-bold text-gray-800">畢業審查系統</h1>
+            <p class="text-gray-500 mt-2">請輸入學號登入</p>
+        </div>
+        
+        <form id="loginForm" class="space-y-6">
+            <div>
+                <label class="block text-gray-700 text-sm font-bold mb-2">學號 (Student ID)</label>
+                <input type="text" id="loginIdInput" 
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg" 
+                    placeholder="例如: 1121726" required>
+            </div>
+            
+            <button type="submit" 
+                class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 transition duration-300 shadow-lg">
+                登入系統
+            </button>
+            
+            <p id="loginError" class="text-red-500 text-center text-sm hidden font-bold animate-pulse"></p>
+        </form>
+        
+        <div class="mt-6 text-center text-xs text-gray-400">
+            僅限本系學生使用
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "http://127.0.0.1:5000/api";
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const idInput = document.getElementById('loginIdInput');
+            const id = idInput.value.trim();
+            const errBox = document.getElementById('loginError');
+
+            if (!id) return;
+
+            // UI 反饋：按鈕變處理中
+            const btn = e.target.querySelector('button');
+            const originalText = btn.innerText;
+            btn.disabled = true; btn.innerText = "驗證中...";
+
+            try {
+                const res = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ student_id: id })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    // ★★★ 關鍵：登入成功後，將使用者資料存入 localStorage ★★★
+                    localStorage.setItem('currentUser', JSON.stringify(data.user));
+                    
+                    // 跳轉到主頁面
+                    window.location.href = 'index.html';
+                } else {
+                    errBox.innerText = `❌ ${data.message}`;
+                    errBox.classList.remove('hidden');
+                }
+            } catch (err) {
+                console.error(err);
+                errBox.innerText = "❌ 連線錯誤，請檢查後端伺服器";
+                errBox.classList.remove('hidden');
+            } finally {
+                btn.disabled = false; btn.innerText = originalText;
+            }
+        });
+    </script>
+</body>
+</html>

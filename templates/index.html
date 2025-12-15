@@ -95,7 +95,7 @@
         <h1 class="text-3xl font-bold mb-8">畢業審查小幫手</h1>
         
         <p class="text-sm text-blue-200 mb-6">
-            請上傳您的「畢業資格審查個人詳細報表」PDF 檔案，系統將自動為您分析。
+            如果您是第一次來，請上傳您的「畢業資格審查個人詳細報表」PDF 檔案，系統將自動為您分析。
         </p>
 
         <form id="uploadForm">
@@ -155,12 +155,7 @@
                 </div>
                 
                 <div id="chatHistory" class="p-6 h-64 overflow-y-auto space-y-4 bg-gray-50">
-                    <div class="flex items-start">
-                        <div class="bg-indigo-100 p-2 rounded-full mr-3 flex-shrink-0">🤖</div>
-                        <div class="bg-white p-3 rounded-lg shadow-sm text-gray-700 text-sm border border-gray-200">
-                            你好！我是你的學業助手。成績單已分析完畢，有任何問題（例如：我還差多少選修？）都可以直接問我喔！
-                        </div>
-                    </div>
+                    <!-- 聊天訊息將插入此處 -->
                 </div>
 
                 <div class="p-4 bg-white border-t border-gray-200 flex">
@@ -201,6 +196,15 @@
         // 
         // =====================================================================
 
+        // =====================================================================
+        //  1. 設定 API 網址 (修正點：統一設定 API_BASE)
+        // =====================================================================
+        const API_BASE = 'http://127.0.0.1:5000/api';
+        
+        const UPLOAD_URL = `${API_BASE}/audit`;      // 上傳 PDF
+        const CHAT_URL = `${API_BASE}/chat`;         // 聊天
+        const DATA_URL = `${API_BASE}/student/data`; // (新) 自動抓取舊資料
+
         // 取得 HTML 元素
         const uploadForm = document.getElementById('uploadForm');
         const pdfFileInput = document.getElementById('pdfFile');
@@ -212,24 +216,119 @@
         const totalProgress = document.getElementById('totalProgress');
         const chartsGrid = document.getElementById('chartsGrid');
         const courseListContainer = document.getElementById('courseListContainer'); // (新)
-
         // 新增聊天室 DOM 元素變數 
         const chatSection = document.getElementById('chatSection');
         const chatHistory = document.getElementById('chatHistory');
         const userQuestionInput = document.getElementById('userQuestionInput');
         const sendQuestionBtn = document.getElementById('sendQuestionBtn');
-
-        // 後端 API 的網址
-        const API_URL = 'http://127.0.0.1:5000/api/audit';
-
-        // 對話 API 網址
-        const CHAT_API_URL = 'http://127.0.0.1:5000/api/chat';
         
-        // 用於儲存 Chart.js 實例，以便稍後銷毀
-        let activeCharts = [];
 
-        // 全域變數儲存學生資料
+        // =====================================================================
+        //  全域變數
+        // =====================================================================
+        let currentStudentId = null;
         let globalStudentData = null;
+        let activeCharts = [];
+        // =====================================================================
+        //  4. 頁面載入初始化 (檢查登入 + 自動抓資料)
+        // =====================================================================
+        window.addEventListener('DOMContentLoaded', async () => {
+            // A. 檢查是否已登入
+            const storedUser = localStorage.getItem('currentUser');
+            if (!storedUser) {
+                window.location.href = 'login.html'; // 沒登入踢回去
+                return;
+            }
+
+            // B. 設定當前使用者
+            const user = JSON.parse(storedUser);
+            currentStudentId = user.id;
+
+            // 更新側邊欄顯示 (選擇性功能，若您的 HTML 沒這個 ID 可忽略)
+            const userDisplay = document.getElementById('currentUserDisplay');
+            if(userDisplay) userDisplay.innerText = `${user.name} (${user.id})`;
+
+            // C. 嘗試從後端撈取舊資料
+            await fetchAndRenderOldData(currentStudentId);
+        });
+
+        // =====================================================================
+        //  核心功能：撈取舊資料
+        // =====================================================================
+        // 自動撈取資料函式
+        async function fetchAndRenderOldData(studentId) {
+            // 顯示載入動畫
+            resultsContainer.style.display = 'block'; // 確保容器顯示
+            studentInfo.innerHTML = '<div class="flex items-center text-gray-500 animate-pulse"><div class="loader mr-3 border-gray-300 border-t-blue-500"></div>正在讀取資料庫...</div>';
+
+            try {
+                const res = await fetch(DATA_URL, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ student_id: studentId })
+                });
+                
+                const data = await res.json();
+
+                if (data.found) {
+                    // =========================================================
+                    // 情境 1: 資料庫有這個人
+                    // =========================================================
+                    
+                    // ★ 關鍵判斷：雖然找到了人，但他有修課紀錄嗎？
+                    // 如果總學分為 0，我們假設他雖然在名單內，但還沒上傳過成績單
+                    if (data.totals.total_earned > 0) {
+                        
+                        // --- 情境 1-A: 有人 且 有成績 (舊生/已上傳過) ---
+                        globalStudentData = data;
+                        renderResults(data); // 畫圖表
+                        showStatus('歡迎回來！已自動載入您的修課紀錄。', 'success');
+                        
+                        // 延遲發送 AI 歡迎語
+                        setTimeout(() => {
+                            const fullName = data.student_info.name;
+                            // 取名字後兩個字 + 同學
+                            const nickName = fullName.length > 2 ? fullName.slice(-2) : fullName;
+                            
+                            // 修正後的 AI 歡迎語
+                            appendMessage('ai', `嗨 ${nickName}同學！我讀取到你的資料了，您目前已修 ${data.totals.total_earned} 學分。想問什麼都可以問我喔！`);
+                        }, 500);
+
+                    } else {
+                        // --- 情境 1-B: 有人 但 沒成績 (尚未上傳 PDF) ---
+                        // 雖然資料庫有學號，但還沒審查過，所以不畫圖表，而是引導上傳
+                        
+                        studentInfo.innerHTML = `
+                            <h3 class="text-xl font-semibold text-gray-700">嗨，${data.student_info.name} 同學！</h3>
+                            <p class="text-gray-600 mt-1">
+                                系統已有您的學籍資料 (${data.student_info.id})，但<strong class="text-red-500">尚未偵測到修課紀錄</strong>。
+                            </p>
+                            <p class="text-blue-600 mt-2 font-bold">
+                                ⇩ 請使用左側欄位上傳您的成績單 PDF 以開始審查。
+                            </p>
+                        `;
+                        showStatus(`歡迎 ${data.student_info.name}！請上傳 PDF 以建立您的修課檔案。`, 'info');
+                        
+                        // 這裡不呼叫 renderResults，也不發送 AI 訊息，保持畫面乾淨等待上傳
+                    }
+
+                } else {
+                    // =========================================================
+                    // 情境 2: 資料庫完全沒這個人 (轉系生/新用戶)
+                    // =========================================================
+                    studentInfo.innerHTML = `
+                        <h3 class="text-xl font-semibold text-gray-700">歡迎新同學！</h3>
+                        <p class="text-gray-600 mt-1">目前資料庫沒有您的紀錄，請使用左側欄位 <strong>上傳 PDF</strong> 來開始分析。</p>
+                    `;
+                    showStatus('請上傳您的成績單 PDF 以建立資料。', 'info');
+                }
+
+            } catch (err) {
+                console.error("Auto-fetch error:", err);
+                showStatus('無法連線至資料庫，請檢查伺服器狀態。', 'error');
+            }
+        }
+        // =====================================================================
 
         // 監聽檔案選擇
         pdfFileInput.addEventListener('change', () => {
@@ -287,13 +386,15 @@
 
             // 上傳開始時，重置聊天室 
             globalStudentData = null; // 清空舊資料
+            // 這裡文字建議稍微修飾，不然還沒跑完就說跑完了會怪怪的
             chatHistory.innerHTML = `
                 <div class="flex items-start">
                     <div class="bg-indigo-100 p-2 rounded-full mr-3 flex-shrink-0">🤖</div>
                     <div class="bg-white p-3 rounded-lg shadow-sm text-gray-700 text-sm border border-gray-200">
-                        你好！成績單分析完畢，有任何問題（例如：我的學習規劃？）都可以直接問我喔！
+                       你好！正在分析您的成績單... 分析完成後，圖表會顯示在下方，有問題也可以直接問我！
                     </div>
                 </div>`;
+            // ----------------------------------------------------------
 
             uploadButton.disabled = true;
             uploadButton.querySelector('span').innerText = '處理中...';
@@ -306,7 +407,7 @@
 
             try {
                 // 4. 發送請求到後端
-                const response = await fetch(API_URL, {
+                const response = await fetch(UPLOAD_URL, {
                     method: 'POST',
                     body: formData,
                 });
@@ -317,6 +418,45 @@
                     throw new Error(data.error || '發生未知的後端錯誤。');
                 }
 
+                
+                // =========================================================
+                // ★ 修改重點：嚴格模式 (學號不符 -> 登出 或 重傳)
+                // =========================================================
+                if (currentStudentId && data.student_info.id !== currentStudentId) {
+                    
+                    // 跳出對話框讓使用者選擇
+                    const isWrongAccount = confirm(
+                        `⚠️ 學號不符警告！\n\n` +
+                        `目前登入：${currentStudentId}\n` +
+                        `檔案學號：${data.student_info.id}\n\n` +
+                        `系統偵測到學號不一致，無法繼續。\n` +
+                        `請問您是否登錯帳號了？\n\n` +
+                        `● 按下 [確定] ➜ 登出，回到登入頁面\n` +
+                        `● 按下 [取消] ➜ 留在這裡，重新上傳正確檔案`
+                    );
+
+                    if (isWrongAccount) {
+                        // === 選項 A：使用者承認登錯帳號 ===
+                        // 1. 清除登入資訊
+                        localStorage.removeItem('currentUser');
+                        // 2. 踢回登入頁
+                        window.location.href = 'login.html';
+                        return; // 停止執行
+                    } else {
+                        // === 選項 B：使用者想重新上傳 ===
+                        showStatus(`❌ 上傳失敗：請上傳屬於 ${currentStudentId} 的 PDF 檔案。`, 'error');
+                        
+                        // 恢復按鈕狀態，讓他可以再次上傳
+                        uploadButton.disabled = false;
+                        uploadButton.querySelector('span').innerHTML = '<span class="flex items-center justify-center">開始審查</span>';
+                        
+                        // 清空剛剛顯示的 "正在分析..." 訊息
+                        chatHistory.innerHTML = ''; 
+
+                        return; // ★ 這裡很重要：直接結束，不讓下方的資料顯示出來！
+                    }
+                }
+                // =========================================================
                 // 上傳成功，儲存資料供聊天使用 
                 globalStudentData = data; 
                 // 注意：這裡移除了原本檢查 data.ai_advice 的程式碼
@@ -414,15 +554,11 @@
             const text = userQuestionInput.value.trim();
             if (!text) return; // 如果沒輸入文字，直接結束
 
-            // B. ★★★ 修正點：先檢查資料是否存在，再讀取 ID ★★★
-            // 如果 globalStudentData 是 null，這裡就會攔截並警告，不會報錯
-            if (!globalStudentData || !globalStudentData.student_info || !globalStudentData.student_info.id) {
-                alert("請先上傳 PDF 檔案，系統分析後才能回答問題喔！");
+            // ★ 安全檢查：如果還沒抓到資料，就不能聊天
+            if (!globalStudentData || !currentStudentId) {
+                alert("請先等待資料載入完成，或先上傳 PDF 檔案！");
                 return;
             }
-
-            // C. 確定資料安全後，才讀取學號
-            const currentStudentId = globalStudentData.student_info.id;
 
             // D. 顯示 User 訊息並清空輸入框
             appendMessage('user', text);

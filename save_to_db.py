@@ -11,6 +11,45 @@ db_config = {
     'use_pure': True
 }
 
+# ==========================================================
+#  登入檢查函式：檢查學生是否存在於資料庫
+# ==========================================================
+def check_user_exists(student_id):
+    print(f">>> [Login Check] 正在查詢學號: {student_id}")
+    connection = None
+    try:
+        # 建立連線 (這裡會使用您檔案上方定義好的 db_config)
+        connection = mysql.connector.connect(**db_config)
+        
+        # 使用 dictionary=True 讓回傳結果變成字典
+        cursor = connection.cursor(dictionary=True)
+
+        sql = "SELECT * FROM STUDENT WHERE StudentID = %s"
+        cursor.execute(sql, (student_id,))
+        user = cursor.fetchone()
+
+        if user:
+            print(f">>> 找到學生: {user['StudentName']}")
+            # 回傳前端需要的資料格式
+            return {
+                "id": user['StudentID'],
+                "name": user['StudentName'],
+                "department": f"{user['Department']} {user['Major']}"
+            }
+        else:
+            print(">>> 查無此人")
+            return None
+
+    except Error as e:
+        print(f"!!! 資料庫查詢錯誤: {e}")
+        return None
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+# ==========================================================
+#  1. 儲存函式：將學生資料與課程資料存入 MySQL
+# ==========================================================
 def save_student_data(student_info, all_courses):
     print(">>> [Debug] 進入 save_student_data 函式")
     connection = None
