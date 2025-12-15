@@ -1,0 +1,6 @@
+Flask
+mysql-connector-python
+python-dotenv
+groq
+pdfplumber
+requests
