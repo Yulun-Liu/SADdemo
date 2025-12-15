@@ -106,25 +106,3 @@ python app.py
 
 This project is licensed under the MIT License.
 
-````
-
-***
-
-### 💡 補充說明：如何建立 `requirements.txt`
-
-為了讓上面的安裝教學有效，您需要在專案資料夾中產生一個 `requirements.txt` 檔案，列出您用到的套件。
-
-您可以在終端機輸入以下指令自動產生（如果您有用虛擬環境）：
-```bash
-pip freeze > requirements.txt
-````
-
-或者，您可以手動建立一個 `requirements.txt` 檔案，內容大概是這樣：
-
-```text
-Flask
-mysql-connector-python
-groq
-python-dotenv
-pdfplumber
-```
