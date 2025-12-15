@@ -119,7 +119,7 @@ This project is licensed under the MIT License.
 pip freeze > requirements.txt
 ````
 
-或者，您可以手動建立一個 `requirements.txt` 檔案，內容大概是這樣（根據我們這幾天用到的）：
+或者，您可以手動建立一個 `requirements.txt` 檔案，內容大概是這樣：
 
 ```text
 Flask
@@ -128,5 +128,3 @@ groq
 python-dotenv
 pdfplumber
 ```
-
-把這份 README 放上去後，您的 GitHub 專案看起來就會非常專業了！祝您專案順利！ 🚀
