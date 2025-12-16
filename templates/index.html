@@ -123,9 +123,17 @@
             </button>
         </form>
     </div>
-
-    <!-- 右側主內容區 -->
-    <div class="ml-80 p-12">
+    <!-- 右側圖表區 -->
+    <div class="fixed right-0 top-0 w-80 h-full bg-white border-l border-gray-200 p-6 overflow-y-auto shadow-lg z-20">
+        <h3 class="text-xl font-bold text-gray-800 mb-6 flex items-center border-b pb-2">
+            📊 學分儀表板
+        </h3>
+        
+        <div id="chartsGrid" class="flex flex-col items-center gap-4 pb-20 overflow-y-auto">
+            </div>
+    </div>
+    <!-- 中間主內容區 -->
+    <div class="ml-80 mr-80 p-12 transition-all duration-300">
         <h2 class="text-4xl font-bold text-gray-800 mb-8">審查結果</h2>
 
         <!-- 狀態訊息 (合併 載入 / 錯誤 / 成功) -->
@@ -169,15 +177,7 @@
                 </div>
             </div>
 
-            <!-- 3. 圖表網格 -->
-            <div>
-                <h3 class="text-2xl font-semibold text-gray-700 mb-4">各類別學分進度</h3>
-                <div id="chartsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <!-- 圓餅圖將插入此處 -->
-                </div>
-            </div>
-
-            <!-- 4. 課程修習狀態總表 (新) -->
+            <!-- 3. 課程修習狀態總表 (新) -->
             <div>
                 <h3 class="text-2xl font-semibold text-gray-700 mb-4">各類別課程修習狀態總表</h3>
                 <div id="courseListContainer" class="space-y-2">
@@ -279,21 +279,56 @@
                     // 如果總學分為 0，我們假設他雖然在名單內，但還沒上傳過成績單
                     if (data.totals.total_earned > 0) {
                         
-                        // --- 情境 1-A: 有人 且 有成績 (舊生/已上傳過) ---
-                        globalStudentData = data;
-                        renderResults(data); // 畫圖表
-                        showStatus('歡迎回來！已自動載入您的修課紀錄。', 'success');
-                        
-                        // 延遲發送 AI 歡迎語
+                        globalStudentData = data;  // 1. 存入全域變數 (修復第二張圖的錯誤)
+                        renderResults(data);       // 2. 繪製圖表並移除讀取動畫 (修復第一張圖的卡頓)
+                        // 延遲發送 AI 歡迎語 (內容增強版)
                         setTimeout(() => {
                             const fullName = data.student_info.name;
-                            // 取名字後兩個字 + 同學
                             const nickName = fullName.length > 2 ? fullName.slice(-2) : fullName;
-                            
-                            // 修正後的 AI 歡迎語
-                            appendMessage('ai', `嗨 ${nickName}同學！我讀取到你的資料了，您目前已修 ${data.totals.total_earned} 學分。想問什麼都可以問我喔！`);
-                        }, 500);
 
+                            // 1. 計算總缺修學分
+                            const totalEarned = data.totals.total_earned;
+                            const totalRequired = data.totals.total_required;
+                            const totalMissing = Math.max(0, totalRequired - totalEarned);
+
+                            // 2. 找出缺學分的「關鍵類別」 (只列出還有缺的)
+                            let missingDetails = [];
+                            // 定義要檢查的類別順序
+                            const keyCategories = ["必修", "院必修", "通識", "選修"];
+                            
+                            keyCategories.forEach(cat => {
+                                if (data.audit_report[cat]) {
+                                    const catData = data.audit_report[cat];
+                                    const gap = Math.max(0, catData.goal - catData.earned_sum);
+                                    if (gap > 0) {
+                                        // 例如: "必修尚缺 4"
+                                        missingDetails.push(`**${cat}** 尚缺 ${gap} 學分`);
+                                    }
+                                }
+                            });
+
+                            // 3. 組合 AI 訊息
+                            let welcomeMsg = `嗨 ${nickName}同學，歡迎回來！👋\n\n`;
+                            welcomeMsg += `系統分析您目前的修課進度：\n`;
+                            welcomeMsg += `- 目前已修： **${totalEarned}** 學分\n`;
+                            
+                            if (totalMissing > 0) {
+                                welcomeMsg += `- 距離畢業門檻還差： <span class="text-red-600 font-bold">${totalMissing}</span> 學分 💪\n\n`;
+                                
+                                if (missingDetails.length > 0) {
+                                    welcomeMsg += `🔍 **重點缺修類別提醒：**\n`;
+                                    // 將缺修類別變成條列式
+                                    welcomeMsg += missingDetails.map(item => `* ${item}`).join('\n');
+                                    welcomeMsg += `\n\n`;
+                                }
+                                welcomeMsg += `想知道具體缺哪幾門課，或是如何補齊通識，都可以直接問我喔！`;
+                            } else {
+                                welcomeMsg += `\n🎉 **恭喜！您已達到畢業總學分門檻！** 🎉\n請記得確認是否還有特定必修課未通過喔。`;
+                            }
+
+                            // 4. 發送訊息
+                            appendMessage('ai', welcomeMsg);
+                        }, 500);
                     } else {
                         // --- 情境 1-B: 有人 但 沒成績 (尚未上傳 PDF) ---
                         // 雖然資料庫有學號，但還沒審查過，所以不畫圖表，而是引導上傳
@@ -510,7 +545,7 @@
                         ${totalEarned} / ${totalRequired} 學分
                     </span>
                 </div>
-                <div class_w-full bg-gray-200 rounded-full h-4">
+                <div class="w-full bg-gray-200 rounded-full h-4">
                     <div class="${totalColor} h-4 rounded-full text-xs text-white text-center font-bold" style="width: ${totalPercent > 100 ? 100 : totalPercent}%">
                         ${totalPercent.toFixed(0)}%
                     </div>
@@ -569,7 +604,7 @@
 
             try {
                 // F. 呼叫後端 API
-                const res = await fetch(CHAT_API_URL, {
+                const res = await fetch(CHAT_URL, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ 
@@ -657,66 +692,70 @@
             if(el) el.remove();
         }
 
-        // 繪製圓餅圖的函數
+        // 繪製圓餅圖的函數 (單欄精緻版)
         function createDonutChart(category, data) {
+            // 1. 建立外層容器
             const chartWrapper = document.createElement('div');
-            chartWrapper.className = 'bg-white p-6 rounded-lg shadow h-full flex flex-col';
+            // 設定固定寬度 (w-60 約 240px)，讓外框統一
+            chartWrapper.className = 'w-60 bg-white p-3 rounded-lg shadow-sm border border-gray-100 flex flex-col items-center justify-center flex-shrink-0';
             
+            // 2. 建立 Canvas
+            const canvas = document.createElement('canvas');
+            // 設定高度為 140px
+            canvas.style.height = '140px'; 
+            canvas.style.width = '140px';
+            chartWrapper.appendChild(canvas);
+            
+            // 3. 建立標題
+            const title = document.createElement('h4');
+            title.className = 'text-sm font-bold text-gray-700 text-center mt-2 truncate w-full';
+            title.innerText = category;
+            chartWrapper.appendChild(title);
+            
+            // 4. 加入 DOM
+            chartsGrid.appendChild(chartWrapper);
+
+            // 5. 計算數據
             const goal = data.goal;
             const earned = data.earned_sum;
             const remaining = Math.max(0, goal - earned);
             const percent = goal > 0 ? (earned / goal) * 100 : 100;
             const isCompleted = earned >= goal;
             
-            let color = '#3B82F6'; // Blue
-            if (isCompleted) color = '#10B981'; // Green
-            if (percent < 75) color = '#F59E0B'; // Yellow/Orange
-            if (percent < 50) color = '#EF4444'; // Red
+            // 6. 決定顏色
+            let color = '#3B82F6'; 
+            if (isCompleted) color = '#10B981'; 
+            if (percent < 75) color = '#F59E0B'; 
+            if (percent < 50) color = '#EF4444';
 
-            // (新) 通識的特殊檢查
             let isCoreComplete = true;
             if (category === '通識') {
                 isCoreComplete = data.is_core_complete;
-                if (!isCoreComplete) color = '#EF4444'; // 如果核心未完成，必定是紅色
-                if (isCompleted && isCoreComplete) color = '#10B981'; // 兩者都完成才是綠色
+                if (!isCoreComplete) color = '#EF4444'; 
+                if (isCompleted && isCoreComplete) color = '#10B981'; 
             }
 
-            // Canvas
-            const canvas = document.createElement('canvas');
-            chartWrapper.appendChild(canvas);
-            
-            // 圖表標題
-            const title = document.createElement('h4');
-            title.className = 'text-xl font-semibold text-gray-700 text-center mt-4';
-            title.innerText = category;
-            chartWrapper.appendChild(title);
-            
-            chartsGrid.appendChild(chartWrapper);
-            
-            // 建立圖表
+            // 7. 繪圖
             const ctx = canvas.getContext('2d');
             const chart = new Chart(ctx, {
                 type: 'doughnut',
                 data: {
                     datasets: [{
                         data: [earned, remaining],
-                        backgroundColor: [color, '#E5E7EB'],
+                        backgroundColor: [color, '#F3F4F6'],
                         borderWidth: 0,
                     }]
                 },
                 options: {
-                    responsive: true,
-                    cutout: '70%',
+                    responsive: false, // 強制使用設定的寬高
+                    maintainAspectRatio: false,
+                    cutout: '70%', 
                     plugins: {
                         legend: { display: false },
                         tooltip: { enabled: false },
                     },
-                    animation: {
-                        animateScale: true,
-                        animateRotate: true
-                    }
+                    animation: { animateScale: true }
                 },
-                // (新) 中間的文字
                 plugins: [{
                     id: 'centerText',
                     afterDraw: (chart) => {
@@ -724,44 +763,35 @@
                         const { width, height } = chart.chartArea;
                         
                         ctx.restore();
-                        ctx.font = 'bold 1.5rem Inter';
+                        ctx.font = 'bold 1.1rem Inter';
                         ctx.fillStyle = color;
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
                         
-                        let text1 = '';
-                        if (category === '其他') {
-                            text1 = `${earned}`;
-                        } else if (category === '通識') {
-                            const coreEarned = data.core_passed_count;
-                            const coreGoal = data.core_required_prefixes.length;
-                            text1 = `${earned}/${goal}`; // 學分
-                            
-                            // (新) 核心文字
-                            ctx.font = 'bold 1rem Inter';
-                            ctx.fillStyle = isCoreComplete ? '#10B981' : '#EF4444';
-                            ctx.fillText(`${coreEarned}/${coreGoal} 核心`, width / 2, height / 2 + 30);
-
-                        } else {
-                             text1 = `${earned}/${goal}`;
+                        let text1 = `${earned}/${goal}`;
+                        if (category === '其他') text1 = `${earned}`;
+                        
+                        // 文字位置微調
+                        ctx.fillText(text1, width / 2, height / 2 - 5);
+                        
+                        ctx.font = '0.75rem Inter';
+                        ctx.fillStyle = '#9CA3AF';
+                        ctx.fillText('學分', width / 2, height / 2 + 15);
+                        
+                        // 通識核心提示
+                        if (category === '通識') {
+                             ctx.font = 'bold 0.7rem Inter';
+                             ctx.fillStyle = isCoreComplete ? '#10B981' : '#EF4444';
+                             const coreText = `${data.core_passed_count}/${data.core_required_prefixes.length} 核心`;
+                             ctx.fillText(coreText, width / 2, height - 5);
                         }
-                        
-                        ctx.fillStyle = color; // 確保顏色正確
-                        ctx.font = 'bold 1.5rem Inter';
-                        ctx.fillText(text1, width / 2, height / 2 - (category === '通識' ? 10 : 0));
-                        
-                        // "學分"
-                        ctx.font = '0.875rem Inter';
-                        ctx.fillStyle = '#6B7280';
-                        ctx.fillText('學分', width / 2, height / 2 + 15 + (category === '通識' ? -10 : 0));
-                        
+
                         ctx.save();
                     }
                 }]
             });
             activeCharts.push(chart);
         }
-
         // (新) 建立課程列表（手風琴）的函數
         function renderCourseList(category, data) {
             const courses = data.earned_courses || [];

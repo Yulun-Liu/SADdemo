@@ -189,26 +189,30 @@ def calculate_graduation_audit(all_courses: list) -> Tuple[dict, dict]:
             "core_passed_count": 0,
             "is_core_complete": False 
         },
-        "共同必修": {"goal": 17, "earned_sum": 0, "earned_courses": [], "failed_courses": []},
+        "共同必修": {"goal": 15, "earned_sum": 0, "earned_courses": [], "failed_courses": []},
         "其他":     {"goal": 0,  "earned_sum": 0, "earned_courses": [], "failed_courses": []},
     }
+    # --- 1.1: 建立共同必修四大規則追蹤 ---
+    common_req_status = {
+        'English': {'name': '英語', 'goal': 10, 'earned': 0},
+        'Chinese': {'name': '國文', 'goal': 4, 'earned': 0},
+        'Service': {'name': '服務學習', 'goal': 1, 'earned': 0},
+    }
+    # --- 1.2: 初始化總學分變數 ---
 
     total_required_credits = 128 # 畢業總學分 (如圖所示)
     total_earned_credits = 0
-
-    # --- (新) 1.5: 兩階段審查 (Two-Pass) - 找出所有已通過的課號 ---
-    # 建立一個集合 (Set)，儲存所有「通過」的「課號」
-    # 這樣我們可以快速檢查某門課是否曾經通過
-    passed_course_ids = set()
+    # --- 1.3: 建立一個集合，追蹤所有「有通過」的課號 ---
+    # 追蹤變數
+    passed_course_ids_audit = set() # 這次審查中「已經算過學分」的課號
+    passed_course_ids_global = set() # 所有「有通過」紀錄的課號 (用於過濾未過)
+    
+    # 預先掃描：建立全域通過名單
     for course in all_courses:
         if course.get("得分") == "通過":
-            course_code = course.get("課號")
-            if course_code:
-                passed_course_ids.add(course_code)
-    
-    print(f"--- (2/3 - Pre-Scan) 預先掃描：找到 {len(passed_course_ids)} 門不重複的已通過課程 ---")
-    # --- 預先掃描結束 ---
-
+            cid = course.get("課號")
+            if cid: passed_course_ids_global.add(cid)
+    print(f"--- (2/3 - Pre-Scan) 建立全域通過名單，共 {len(passed_course_ids_global)} 門課程 ---")
     # --- 1.6: (新) 建立一個集合，追蹤已加入「未通過」列表的課號 ---
     # 集合 2: 儲存已加入「未通過列表」的課號，避免重複
     failed_course_ids_added = set()
@@ -217,8 +221,9 @@ def calculate_graduation_audit(all_courses: list) -> Tuple[dict, dict]:
     for course in all_courses:
         
         course_display_name = f"[課號: {course.get('課號')}] {course.get('課名')}"
+        course_code = str(course.get('課號', '')).upper().strip()
+        course_name = str(course.get('課名', ''))
         course_type = course.get("選別")
-        course_code = course.get("課號")
         score = course.get("得分")
 
         category_key = "其他" # 預設
@@ -235,14 +240,14 @@ def calculate_graduation_audit(all_courses: list) -> Tuple[dict, dict]:
             category_key = "必修"
 
         if score == "通過":
-            credits_str = course.get("學分")
-            if not credits_str:
-                continue
-            
+            # ★ 修正點：防止重複計算相同課號的學分 (例如重修刷分)
+            if course_code in passed_course_ids_audit:
+                continue # 這門課已經算過學分了，跳過
+
             try:
-                credits = float(credits_str)
-            except (ValueError, TypeError):
-                continue
+                credits = float(course.get("學分", 0))
+            except:
+                credits = 0.0
             
             display_credits = int(credits) if credits.is_integer() else credits
             course_display_passed = f"{course_display_name} - {display_credits} 學分"
@@ -251,17 +256,37 @@ def calculate_graduation_audit(all_courses: list) -> Tuple[dict, dict]:
             audit_categories[category_key]["earned_courses"].append(course_display_passed)
             total_earned_credits += credits # (新) 累加總學分
 
+            # 標記這門課已經算過分了
+            if course_code:
+                passed_course_ids_audit.add(course_code)
+            
+            # ==========================================
+            # ★ 核心修改：共同必修 4 大規則判斷
+            # ==========================================
+            
+            # 規則 1: 英語 (10學分) -> 課號 LC 或 EL 開頭
+            if course_code.startswith('LC') or course_code.startswith('EL'):
+                common_req_status['English']['earned'] += credits
+            
+            # 規則 2: 國文 (4學分) -> 課號 CL 開頭
+            elif course_code.startswith('CL'):
+                common_req_status['Chinese']['earned'] += credits
+            
+            # 規則 3: 服務學習 (1學分) -> 課名包含 "服務"
+            if "服務" in course_name:
+                common_req_status['Service']['earned'] += credits
+            # ==========================================
             if category_key == "通識" and course_code:
                 for prefix in audit_categories["通識"]["core_required_prefixes"]:
                     if course_code.startswith(prefix):
                         audit_categories["通識"]["core_passed_prefixes"].add(prefix)
                         break
-        
+                        
         elif score == "未過":
             # --- (新) 檢查重修 & 重複被當 邏輯 ---
             
             # 檢查 1: 如果這門課「曾經通過」，就忽略這筆 "未過" 紀錄
-            if course_code in passed_course_ids:
+            if course_code in passed_course_ids_global:
                 continue 
             
             # 檢查 2: (如果沒通過) 檢查是否「已經加過」這門 "未過" 的課
@@ -282,12 +307,21 @@ def calculate_graduation_audit(all_courses: list) -> Tuple[dict, dict]:
     gen_ed["core_passed_count"] = len(gen_ed["core_passed_prefixes"])
     gen_ed["core_missing_prefixes"] = sorted(list(gen_ed["core_required_prefixes"] - gen_ed["core_passed_prefixes"]))
     gen_ed["is_core_complete"] = len(gen_ed["core_missing_prefixes"]) == 0
-    
-    print("--- (2/3 - A) 審查計算完成 ---")
-
     # --- 4. (BUG 修正) 將 Set 轉換為 List 以便 JSON 序列化 ---
     gen_ed["core_required_prefixes"] = sorted(list(gen_ed["core_required_prefixes"]))
     gen_ed["core_passed_prefixes"] = sorted(list(gen_ed["core_passed_prefixes"]))
+    
+    # ==========================================
+    # ★ 新增：結算共同必修缺額，並存入 audit_categories
+    # ==========================================
+    for data in common_req_status.values():
+        data['gap'] = max(0, data['goal'] - data['earned'])
+    
+    # 存回去，讓前端或 AI 可以讀到
+    audit_categories['Common_Requirements_Detail'] = common_req_status
+    # ==========================================
+
+    print("--- (2/3 - A) 審查計算完成 ---")
     
     # (新) 建立總計物件
     totals = {
@@ -501,7 +535,25 @@ def handle_chat():
         # 2. 進行畢業審查 (算已通過的)
         audit_results, totals = calculate_graduation_audit(db_courses)
 
-        
+        # ==========================================
+        # ★ 新增：準備共同必修細項 Prompt
+        # ==========================================
+        common_detail = audit_results.get('Common_Requirements_Detail', {})
+        common_req_str = ""
+        if common_detail:
+            # --- ↓↓↓ 修改這裡 ↓↓↓ ---
+            # 1. 自動從 audit_results 抓取共同必修的目標值 (如果抓不到預設 15)
+            common_goal = audit_results.get("共同必修", {}).get("goal", 15)
+            
+            # 2. 將變數放入字串，不再寫死數字
+            common_req_str = f"\n【共同必修詳細檢核 (目標{common_goal}學分)】\n"
+            # --- ↑↑↑ 修改結束 ↑↑↑ ---
+
+            for key, info in common_detail.items():
+                status = "✅ 已完成" if info['gap'] == 0 else f"❌ 尚缺 {info['gap']} 學分"
+                common_req_str += f"- {info['name']}: 目標 {info['goal']}, 目前 {info['earned']} ({status})\n"
+        # ==========================================
+
         # 3. 準備「完整修課紀錄」給 AI (包含所有已修、修習中)
         full_transcript_list = []
         current_taking_credits = 0
@@ -571,6 +623,7 @@ def handle_chat():
         - 待補修必修：{unpassed_compulsory}
         - 通識缺漏：{missing_core}
         
+        {common_req_str}
         【修課大數據 (僅供查閱，除非被問否則**嚴禁**直接貼出)】
         {full_transcript_str}
 
